@@ -5,3 +5,4 @@ peft
 datasets
 wandb
 pexpect
+bitsandbytes>=0.46.1
