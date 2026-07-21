@@ -1,0 +1,7 @@
+torch
+transformers
+trl
+peft
+datasets
+wandb
+pexpect
