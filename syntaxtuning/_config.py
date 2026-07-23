@@ -1,29 +1,27 @@
-"""Syntax Tuning Core: Dataset loading, model setup, LoRA, and Trainer.
-
-Stage 1 SFT — teaches Qwen3-Coder-30B to translate informal mathematical
-statements into formal Lean 4 theorem statements using Herald + Lean Workbook.
-"""
-
+import gc
 import logging
 import os
-import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
+import torch.nn as nn
 import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets
-from peft import LoraConfig, TaskType, get_peft_model
+from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    DataCollatorForSeq2Seq,
     PreTrainedModel,
     PreTrainedTokenizer,
+    Trainer,
     TrainingArguments,
 )
-from trl import SFTConfig, SFTTrainer
+from transformers.activations import ACT2FN
 
 logger = logging.getLogger("SFTCore")
 
@@ -35,57 +33,53 @@ logger = logging.getLogger("SFTCore")
 
 @dataclass
 class RunConfig:
-    """WandB run identity configuration."""
     project: str = "mesh-autoformalizer"
     entity: str = ""
     group: str = "syntax-tuning"
-    name: str = "run"  # Overridden by CLI argument
+    name: str = "run"
     seed: int = 42
 
 
 @dataclass
 class ModelConfig:
-    """Model loading configuration."""
     base_path: str = "models/base_qwen"
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "flash_attention_2"
-    load_in_4bit: bool = False
-    load_in_8bit: bool = False
+    # QLoRA: the whole model (attention + MoE experts) is quantized to NF4 and
+    # lives entirely on the GPU. There is no CPU offload.
+    load_in_4bit: bool = True
 
 
 @dataclass
 class LoRAConfig:
-    """PEFT LoRA adapter configuration.
-
-    High rank (r=64) chosen to ensure sufficient capacity for adapting
-    the model's latent space to Martin-Löf type theory structure.
-    """
-    target_modules: List[str] = field(default_factory=lambda: [
-        "q_proj", "k_proj", "v_proj", "o_proj",
-        "gate_proj", "up_proj", "down_proj"
-    ])
+    # Attention adapters (full rank).
+    target_modules: List[str] = field(default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj"])
     r: int = 64
     lora_alpha: int = 128
-    lora_dropout: float = 0.05
+    # Expert adapters. Experts hold ~96% of params, so a lower rank keeps the
+    # trainable/optimizer footprint inside 32 GB while still adapting them.
+    expert_target_modules: List[str] = field(default_factory=lambda: ["gate_proj", "up_proj", "down_proj"])
+    expert_r: int = 8
+    expert_alpha: int = 16
+    lora_dropout: float = 0.0
     bias: str = "none"
     task_type: str = "CAUSAL_LM"
 
 
 @dataclass
 class DataConfig:
-    """Dataset loading and tokenization configuration."""
     syntax_dir: str = "data/syntax"
-    datasets: List[str] = field(default_factory=lambda: [
-        "herald.jsonl", "lean_workbook.jsonl"
-    ])
+    datasets: List[str] = field(default_factory=lambda: ["herald.jsonl", "lean_workbook.jsonl"])
     max_seq_length: int = 1024
     val_split: float = 0.02
+    # Subsample the combined corpus for light syntax alignment (0 / null = use all).
+    # Syntax tuning is shallow; a curated subset over ~1 epoch avoids overfitting.
+    max_train_samples: int = 0
     num_workers: int = 4
 
 
 @dataclass
 class PromptConfig:
-    """Prompt template configuration for autoformalization task."""
     system: str = (
         "You are an expert mathematician and Lean 4 programmer. Your task is to "
         "translate informal mathematical statements into formal Lean 4 theorem "
@@ -95,7 +89,6 @@ class PromptConfig:
 
 @dataclass
 class SFTCoreConfig:
-    """Aggregated configuration container."""
     run: RunConfig = field(default_factory=RunConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     lora: LoRAConfig = field(default_factory=LoRAConfig)
@@ -109,15 +102,6 @@ class SFTCoreConfig:
 
 
 def load_config(config_path: str, run_name: Optional[str] = None) -> SFTCoreConfig:
-    """Load and parse the YAML configuration into typed dataclasses.
-
-    Args:
-        config_path: Path to the YAML config file.
-        run_name: Optional run name override (e.g., from CLI argument).
-
-    Returns:
-        A fully populated SFTCoreConfig instance.
-    """
     with open(config_path, "r") as f:
         raw = yaml.safe_load(f)
 
@@ -136,38 +120,8 @@ def load_config(config_path: str, run_name: Optional[str] = None) -> SFTCoreConf
 
 
 # =============================================================================
-# Dataset Loading
+# Dataset Loading (completion-only supervision)
 # =============================================================================
-
-
-def format_prompt(
-    informal: str,
-    formal: str,
-    system_prompt: str,
-    tokenizer: PreTrainedTokenizer,
-) -> str:
-    """Format a (informal, formal) pair into a chat-templated string.
-
-    Uses the model's built-in chat template so that special tokens
-    (e.g., <|im_start|>) are handled correctly for Qwen3.
-
-    Args:
-        informal: Natural language math statement (the prompt).
-        formal: Lean 4 theorem statement (the completion to learn).
-        system_prompt: System instruction defining the task.
-        tokenizer: Tokenizer with a chat template.
-
-    Returns:
-        Fully formatted string ready for tokenization.
-    """
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": informal},
-        {"role": "assistant", "content": formal},
-    ]
-    return tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=False
-    )
 
 
 def load_syntax_dataset(
@@ -175,21 +129,10 @@ def load_syntax_dataset(
     prompt_cfg: PromptConfig,
     tokenizer: PreTrainedTokenizer,
 ) -> DatasetDict:
-    """Load, merge, and format Herald + Lean Workbook datasets.
+    """Load, tokenize and mask the syntax-tuning corpus.
 
-    The two datasets share the same JSONL schema:
-      {problem_id, informal_statement, formal_statement, source}
-
-    Skips any records where informal or formal statement is missing/empty,
-    which could arise from malformed entries.
-
-    Args:
-        data_cfg: Data configuration (paths, split ratio).
-        prompt_cfg: Prompt configuration (system message).
-        tokenizer: Tokenizer for chat template formatting.
-
-    Returns:
-        A DatasetDict with 'train' and 'validation' splits.
+    Loss is computed only over the assistant (formal Lean) completion; the
+    system+user prompt tokens are masked with -100.
     """
     syntax_dir = Path(data_cfg.syntax_dir)
     all_datasets: List[Dataset] = []
@@ -203,7 +146,6 @@ def load_syntax_dataset(
         logger.info(f"Loading dataset: {path}")
         ds = Dataset.from_json(str(path))
 
-        # Filter out malformed records
         original_len = len(ds)
         ds = ds.filter(
             lambda ex: bool(ex["informal_statement"]) and bool(ex["formal_statement"]),
@@ -217,124 +159,239 @@ def load_syntax_dataset(
         logger.info(f"  -> {len(ds)} valid records from {ds_file}")
 
     if not all_datasets:
-        raise FileNotFoundError(
-            f"No dataset files found in {syntax_dir}. "
-            "Please run src/data_loader.py first."
-        )
+        raise FileNotFoundError(f"No dataset files found in {syntax_dir}.")
 
     combined = concatenate_datasets(all_datasets)
     logger.info(f"Combined dataset size: {len(combined)} records")
 
-    # Format each record into the chat-templated text
-    def apply_template(batch: Dict[str, List]) -> Dict[str, List]:
-        return {
-            "text": [
-                format_prompt(inf, form, prompt_cfg.system, tokenizer)
-                for inf, form in zip(
-                    batch["informal_statement"], batch["formal_statement"]
-                )
-            ]
-        }
+    if data_cfg.max_train_samples and len(combined) > data_cfg.max_train_samples:
+        combined = combined.shuffle(seed=42).select(range(data_cfg.max_train_samples))
+        logger.info(f"Subsampled to {len(combined)} records for light syntax alignment")
 
-    combined = combined.map(
-        apply_template,
+    system = prompt_cfg.system
+    max_len = data_cfg.max_seq_length
+
+    def tokenize_batch(batch: Dict[str, List]) -> Dict[str, List]:
+        input_ids_out, labels_out, attn_out = [], [], []
+        for informal, formal in zip(batch["informal_statement"], batch["formal_statement"]):
+            base = [{"role": "system", "content": system}, {"role": "user", "content": informal}]
+            prompt_text = tokenizer.apply_chat_template(base, tokenize=False, add_generation_prompt=True)
+            full_text = tokenizer.apply_chat_template(
+                base + [{"role": "assistant", "content": formal}],
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+
+            prompt_ids = tokenizer(prompt_text, add_special_tokens=False).input_ids
+            full_ids = tokenizer(full_text, add_special_tokens=False).input_ids
+
+            # Guard against tokenizer edge cases where the prompt is not a prefix.
+            n_prompt = min(len(prompt_ids), len(full_ids))
+            full_ids = full_ids[:max_len]
+            labels = [-100] * min(n_prompt, len(full_ids)) + full_ids[min(n_prompt, len(full_ids)):]
+
+            input_ids_out.append(full_ids)
+            labels_out.append(labels)
+            attn_out.append([1] * len(full_ids))
+        return {"input_ids": input_ids_out, "labels": labels_out, "attention_mask": attn_out}
+
+    tokenized = combined.map(
+        tokenize_batch,
         batched=True,
         batch_size=512,
         num_proc=data_cfg.num_workers,
         remove_columns=combined.column_names,
-        desc="Formatting prompts",
+        desc="Tokenizing (completion-only)",
     )
 
-    # Deterministic train/val split for reproducibility
-    split = combined.train_test_split(
-        test_size=data_cfg.val_split, seed=42, shuffle=True
+    # Drop examples whose completion was fully truncated away (no supervised tokens).
+    tokenized = tokenized.filter(
+        lambda ex: any(t != -100 for t in ex["labels"]),
+        num_proc=data_cfg.num_workers,
     )
+
+    split = tokenized.train_test_split(test_size=data_cfg.val_split, seed=42, shuffle=True)
     return DatasetDict({"train": split["train"], "validation": split["test"]})
 
 
 # =============================================================================
-# Model Loading
+# Model Loading  (whole-model NF4 QLoRA, GPU-only)
 # =============================================================================
 
 
-def load_model_and_tokenizer(
-    model_cfg: ModelConfig,
-) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
-    """Load the base model and tokenizer with the correct dtype and quantization.
+class _Expert(nn.Module):
+    """A single MoE expert as three plain nn.Linear layers (bnb-quantizable)."""
 
-    For the 30B MoE model on a single 32GB GPU:
-    - We use bf16 WITHOUT quantization to preserve LoRA gradient quality.
-    - Flash Attention 2 is enabled for memory efficiency on long sequences.
+    def __init__(self, hidden_size: int, intermediate_size: int) -> None:
+        super().__init__()
+        self.gate_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.up_proj = nn.Linear(hidden_size, intermediate_size, bias=False)
+        self.down_proj = nn.Linear(intermediate_size, hidden_size, bias=False)
 
-    Args:
-        model_cfg: Model configuration.
 
-    Returns:
-        Tuple of (model, tokenizer).
+class _Experts(nn.Module):
+    """Drop-in for Qwen3MoeExperts using per-expert nn.Linear modules.
+
+    Matches the upstream forward signature so the unmodified sparse-MoE block
+    calls it transparently. Unlike the fused 3D-parameter original, each Linear
+    can be replaced by bitsandbytes Linear4bit and wrapped with its own LoRA
+    adapter.
     """
+
+    def __init__(self, config) -> None:
+        super().__init__()
+        self.num_experts = config.num_experts
+        self.act_fn = ACT2FN[config.hidden_act]
+        for j in range(self.num_experts):
+            self.add_module(str(j), _Expert(config.hidden_size, config.moe_intermediate_size))
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        top_k_index: torch.Tensor,
+        top_k_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        final_hidden_states = torch.zeros_like(hidden_states)
+        with torch.no_grad():
+            expert_mask = torch.nn.functional.one_hot(top_k_index, num_classes=self.num_experts)
+            expert_mask = expert_mask.permute(2, 1, 0)
+            # One host sync per layer (.tolist) instead of one per hit expert (.item).
+            expert_hit = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero().flatten().tolist()
+
+        for expert_idx in expert_hit:
+            top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
+            current_state = hidden_states[token_idx]
+            expert = getattr(self, str(expert_idx))
+            gate = expert.gate_proj(current_state)
+            up = expert.up_proj(current_state)
+            h = self.act_fn(gate) * up
+            h = expert.down_proj(h)
+            h = h * top_k_weights[token_idx, top_k_pos, None]
+            final_hidden_states.index_add_(0, token_idx, h.to(final_hidden_states.dtype))
+
+        return final_hidden_states
+
+
+def _rebuild_experts_as_linear(model: PreTrainedModel, config) -> None:
+    """Replace each layer's fused MoE experts with per-expert nn.Linear modules,
+    copying the pretrained weights across (fused gate_up -> gate_proj/up_proj)."""
+    inter = config.moe_intermediate_size
+    for layer in model.model.layers:
+        fused = layer.mlp.experts
+        gate_up = fused.gate_up_proj.data  # [E, 2*inter, hidden]
+        down = fused.down_proj.data        # [E, hidden, inter]
+
+        new_experts = _Experts(config).to(dtype=gate_up.dtype)
+        for j in range(config.num_experts):
+            expert = getattr(new_experts, str(j))
+            expert.gate_proj.weight.data.copy_(gate_up[j, :inter, :])
+            expert.up_proj.weight.data.copy_(gate_up[j, inter:, :])
+            expert.down_proj.weight.data.copy_(down[j])
+
+        layer.mlp.experts = new_experts
+        del fused, gate_up, down
+        gc.collect()
+
+
+def _quantize_linears_4bit(module: nn.Module, compute_dtype: torch.dtype, skip: Tuple[str, ...], _prefix: str = "") -> None:
+    """Recursively swap every nn.Linear for a bnb Linear4bit, carrying the
+    real (bf16) weights across so quantization happens later on .to('cuda').
+
+    Unlike transformers' replace_with_bnb_linear (which builds meta modules and
+    defers weight materialization to a state-dict load), this copies weights in
+    place, which is what post-hoc quantization of an already-loaded model needs.
+    """
+    import bitsandbytes as bnb
+
+    for name, child in list(module.named_children()):
+        full_name = f"{_prefix}.{name}" if _prefix else name
+        if type(child) is nn.Linear and not any(s in full_name for s in skip):
+            has_bias = child.bias is not None
+            new = bnb.nn.Linear4bit(
+                child.in_features,
+                child.out_features,
+                bias=has_bias,
+                compute_dtype=compute_dtype,
+                compress_statistics=True,
+                quant_type="nf4",
+                device="cpu",
+            )
+            new.weight = bnb.nn.Params4bit(
+                child.weight.data,
+                requires_grad=False,
+                compress_statistics=True,
+                quant_type="nf4",
+            )
+            if has_bias:
+                new.bias = nn.Parameter(child.bias.data, requires_grad=False)
+            setattr(module, name, new)
+        else:
+            _quantize_linears_4bit(child, compute_dtype, skip, full_name)
+
+
+def load_model_and_tokenizer(model_cfg: ModelConfig) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
     dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
     torch_dtype = dtype_map.get(model_cfg.torch_dtype, torch.bfloat16)
 
-    bnb_config = None
-    if model_cfg.load_in_4bit:
-        logger.info("Using 4-bit quantization (NF4)")
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch_dtype,
-            llm_int8_enable_fp32_cpu_offload=True,
-        )
-    elif model_cfg.load_in_8bit:
-        logger.info("Using 8-bit quantization")
-        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+    if not model_cfg.load_in_4bit:
+        raise ValueError("Qwen3-Coder-30B does not fit on 32 GB in bf16; load_in_4bit must be True.")
 
-    import os
-    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+    config = AutoConfig.from_pretrained(model_cfg.base_path, trust_remote_code=True)
+    config._attn_implementation = model_cfg.attn_implementation
 
-    # When using 4-bit with fp32 CPU offload, we provide a custom device_map
-    # that keeps all transformer layers on GPU and offloads only embeddings to CPU.
-    # This avoids the bnb meta-tensor bug while staying within 32 GB VRAM.
-    if bnb_config is not None:
-        from accelerate import infer_auto_device_map, init_empty_weights
-        with init_empty_weights():
-            empty_model = AutoModelForCausalLM.from_config(
-                __import__("transformers").AutoConfig.from_pretrained(
-                    model_cfg.base_path, trust_remote_code=True
-                )
-            )
-        device_map = infer_auto_device_map(
-            empty_model,
-            max_memory={0: "28GiB", "cpu": "48GiB"},
-            no_split_module_classes=["Qwen3MoeDecoderLayer"],
-        )
-        del empty_model
-    else:
-        device_map = "auto"
-
-    logger.info(f"Loading model from: {model_cfg.base_path} (device_map={device_map if isinstance(device_map, str) else 'custom'})")
+    logger.info(f"Loading base model on CPU from: {model_cfg.base_path}")
     model = AutoModelForCausalLM.from_pretrained(
         model_cfg.base_path,
+        config=config,
         dtype=torch_dtype,
-        quantization_config=bnb_config,
-        attn_implementation=model_cfg.attn_implementation,
-        device_map=device_map,
+        device_map="cpu",
         low_cpu_mem_usage=True,
         trust_remote_code=True,
     )
 
+    logger.info("Rebuilding MoE experts as per-expert linear layers...")
+    _rebuild_experts_as_linear(model, config)
+    gc.collect()
+
+    logger.info("Quantizing all linear layers to NF4 (weight-preserving, in place)...")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=torch_dtype,
+    )
+    _quantize_linears_4bit(model, compute_dtype=torch_dtype, skip=("lm_head",))
+    model.is_loaded_in_4bit = True
+    model.config.quantization_config = bnb_config
+
+    logger.info("Moving model to GPU layer-by-layer (quantization happens on .cuda())...")
+    model.model.embed_tokens = model.model.embed_tokens.to("cuda:0")
+    model.model.norm = model.model.norm.to("cuda:0")
+    model.lm_head = model.lm_head.to("cuda:0")
+    n_layers = len(model.model.layers)
+    for i in range(n_layers):
+        model.model.layers[i] = model.model.layers[i].to("cuda:0")
+        gc.collect()
+        torch.cuda.empty_cache()
+        if (i + 1) % 8 == 0:
+            logger.info(f"  Moved {i + 1}/{n_layers} layers to GPU")
+
+    gc.collect()
+    torch.cuda.empty_cache()
+    logger.info(f"Base model resident on GPU: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+
     tokenizer = AutoTokenizer.from_pretrained(
         model_cfg.base_path,
         trust_remote_code=True,
-        padding_side="right",  # Right-pad for decoder-only causal LM
+        padding_side="right",
     )
-
-    # Qwen3 uses a specific EOS token; ensure pad token is correctly set
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         model.config.pad_token_id = tokenizer.eos_token_id
 
-    logger.info("Model and tokenizer loaded successfully.")
+    logger.info("Model and tokenizer loaded successfully (GPU-only).")
     return model, tokenizer
 
 
@@ -344,23 +401,17 @@ def load_model_and_tokenizer(
 
 
 def build_lora_config(lora_cfg: LoRAConfig) -> LoraConfig:
-    """Construct the PEFT LoraConfig from the hyperparameter dataclass.
-
-    The config is passed directly to SFTTrainer via its peft_config argument.
-    TRL handles prepare_model_for_kbit_training internally, which correctly
-    integrates with the installed bitsandbytes and transformers versions.
-
-    Args:
-        lora_cfg: LoRA hyperparameter configuration.
-
-    Returns:
-        A LoraConfig ready to pass to SFTTrainer.
-    """
+    all_targets = list(lora_cfg.target_modules) + list(lora_cfg.expert_target_modules)
+    # Give expert projections a lower rank via pattern matching on their names.
+    rank_pattern = {m: lora_cfg.expert_r for m in lora_cfg.expert_target_modules}
+    alpha_pattern = {m: lora_cfg.expert_alpha for m in lora_cfg.expert_target_modules}
     return LoraConfig(
         task_type=TaskType[lora_cfg.task_type],
-        target_modules=lora_cfg.target_modules,
+        target_modules=all_targets,
         r=lora_cfg.r,
         lora_alpha=lora_cfg.lora_alpha,
+        rank_pattern=rank_pattern,
+        alpha_pattern=alpha_pattern,
         lora_dropout=lora_cfg.lora_dropout,
         bias=lora_cfg.bias,
         inference_mode=False,
@@ -372,60 +423,47 @@ def build_lora_config(lora_cfg: LoRAConfig) -> LoraConfig:
 # =============================================================================
 
 
-def build_training_args(cfg: SFTCoreConfig) -> SFTConfig:
-    """Construct the TRL SFTConfig from the top-level config.
+def build_training_args(cfg: SFTCoreConfig, config_path: str) -> TrainingArguments:
+    with open(config_path, "r") as f:
+        raw = yaml.safe_load(f).get("training", {})
 
-    SFTConfig extends TrainingArguments with sequence-packing and
-    response-only masking, which are critical here:
-    - Packing: Maximizes GPU utilization by filling the context window.
-    - Response-only masking: Loss is computed only on formal_statement tokens,
-      preventing the model from "learning" the question (teacher forcing quality).
-
-    Args:
-        cfg: The full SFTCoreConfig.
-
-    Returns:
-        A populated SFTConfig ready to pass to SFTTrainer.
-    """
-    raw = yaml.safe_load(
-        open("syntaxtuning/config.yaml")
-    ).get("training", {})
-
-    # WandB run name comes from the CLI arg passed at runtime
     os.environ["WANDB_PROJECT"] = cfg.run.project
     os.environ["WANDB_ENTITY"] = cfg.run.entity
     os.environ["WANDB_RUN_GROUP"] = cfg.run.group
 
-    return SFTConfig(
+    return TrainingArguments(
         output_dir=raw.get("output_dir", "models/sft_checkpoints"),
         run_name=cfg.run.name,
         num_train_epochs=raw.get("num_train_epochs", 3),
-        per_device_train_batch_size=raw.get("per_device_train_batch_size", 2),
-        per_device_eval_batch_size=raw.get("per_device_eval_batch_size", 2),
-        gradient_accumulation_steps=raw.get("gradient_accumulation_steps", 16),
+        per_device_train_batch_size=raw.get("per_device_train_batch_size", 1),
+        per_device_eval_batch_size=raw.get("per_device_eval_batch_size", 1),
+        gradient_accumulation_steps=raw.get("gradient_accumulation_steps", 8),
+        # Gradient checkpointing is enabled on the model via
+        # prepare_model_for_kbit_training; keep it off here to avoid double-wrapping.
+        gradient_checkpointing=False,
         learning_rate=raw.get("learning_rate", 2e-4),
         lr_scheduler_type=raw.get("lr_scheduler_type", "cosine"),
-        warmup_ratio=raw.get("warmup_ratio", 0.05),
+        warmup_steps=raw.get("warmup_steps", 100),
         weight_decay=raw.get("weight_decay", 0.01),
         max_grad_norm=raw.get("max_grad_norm", 1.0),
+        optim=raw.get("optim", "paged_adamw_8bit"),
         bf16=raw.get("bf16", True),
         fp16=raw.get("fp16", False),
         eval_strategy=raw.get("eval_strategy", "steps"),
-        eval_steps=raw.get("eval_steps", 500),
+        eval_steps=raw.get("eval_steps", 200),
         save_strategy=raw.get("save_strategy", "steps"),
-        save_steps=raw.get("save_steps", 500),
+        save_steps=raw.get("save_steps", 200),
         save_total_limit=raw.get("save_total_limit", 3),
-        load_best_model_at_end=raw.get("load_best_model_at_end", True),
+        load_best_model_at_end=raw.get("load_best_model_at_end", False),
         metric_for_best_model=raw.get("metric_for_best_model", "eval_loss"),
         greater_is_better=raw.get("greater_is_better", False),
-        logging_steps=raw.get("logging_steps", 25),
+        logging_steps=raw.get("logging_steps", 10),
         report_to=raw.get("report_to", "wandb"),
-        max_length=cfg.data.max_seq_length,
-        packing=raw.get("packing", True),
-        dataset_text_field="text",
+        max_steps=raw.get("max_steps", -1),
         seed=cfg.run.seed,
         data_seed=cfg.run.seed,
-        dataloader_num_workers=cfg.data.num_workers,
+        dataloader_num_workers=min(cfg.data.num_workers, 8),
+        dataloader_pin_memory=True,
     )
 
 
@@ -439,40 +477,31 @@ def build_trainer(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizer,
     dataset: DatasetDict,
-    training_args: SFTConfig,
+    training_args: TrainingArguments,
     lora_config: LoraConfig,
-) -> SFTTrainer:
-    """Wrap the model with LoRA and assemble the SFTTrainer.
+) -> Trainer:
+    # Checkpointing is mandatory: 48-layer activations OOM without it at any
+    # useful batch. Throughput comes from a large batch amortizing the fixed
+    # per-expert launch overhead, not from disabling recompute.
+    model = prepare_model_for_kbit_training(
+        model,
+        use_gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+    )
 
-    Manual QLoRA setup:
-    1. Freeze all base model parameters (no fp32 upcast, unlike
-       prepare_model_for_kbit_training which OOMs on a full-VRAM 4-bit model).
-    2. Enable gradient checkpointing with use_reentrant=False so that
-       enable_input_require_grads() is not needed.
-    3. Call get_peft_model with autocast_adapter_dtype=False to keep LoRA
-       A/B matrices in bf16 instead of fp32, avoiding the 128+ MiB cast OOM.
-
-    Args:
-        cfg: Full configuration.
-        model: The base quantized model (before LoRA wrapping).
-        tokenizer: The model's tokenizer.
-        dataset: DatasetDict with 'train' and 'validation' splits.
-        training_args: SFTConfig training arguments.
-        lora_config: The LoraConfig describing adapter hyperparameters.
-
-    Returns:
-        A configured SFTTrainer ready to call .train() on.
-    """
-    # Step 1: freeze base weights without upcasting to fp32
-    for param in model.parameters():
-        param.requires_grad = False
-
-    # Step 2: gradient checkpointing (use_reentrant=False avoids the
-    # enable_input_require_grads hook that tries to allocate on meta tensors)
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-
-    # Step 3: inject LoRA adapters; keep adapter dtype in bf16
-    model = get_peft_model(model, lora_config, autocast_adapter_dtype=False)
+    # peft (transformers>=5) auto-rewrites qwen3_moe expert target_modules
+    # (gate_proj/up_proj/down_proj) into *fused* target_parameters
+    # (gate_up_proj/down_proj). Our experts are deliberately unfused into
+    # per-expert nn.Linear so bitsandbytes can quantize them, so we mask the
+    # model_type during injection to disable that conversion and let the
+    # unfused Linears match as ordinary target_modules.
+    base_config = model.config
+    original_model_type = base_config.model_type
+    base_config.model_type = "qwen3_moe_unfused"
+    try:
+        model = get_peft_model(model, lora_config, autocast_adapter_dtype=False)
+    finally:
+        base_config.model_type = original_model_type
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -481,11 +510,13 @@ def build_trainer(
         f"({100 * trainable_params / total_params:.2f}%)"
     )
 
-    # Pass the already-wrapped PEFT model; no peft_config so TRL does not re-wrap
-    return SFTTrainer(
+    collator = DataCollatorForSeq2Seq(tokenizer, padding="longest", label_pad_token_id=-100)
+
+    return Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["validation"],
+        data_collator=collator,
         processing_class=tokenizer,
     )

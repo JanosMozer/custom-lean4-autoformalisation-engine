@@ -1,10 +1,3 @@
-# =============================================================================
-# Syntax Tuning Configuration (Stage 1 SFT)
-# Target: Qwen3-Coder-30B-A3B-Instruct (MoE, ~3.3B active params)
-# GPU: NVIDIA RTX 5090Ti (32GB VRAM)
-# Goal: Supervised fine-tuning on NL → Lean 4 formal statement translation.
-# =============================================================================
-
 run:
   project: "mesh-autoformalizer"
   entity: "mozerjanos4-budapesti-m-szaki-s-gazdas-gtudom-nyi-egyetem"
@@ -13,27 +6,25 @@ run:
 
 model:
   base_path: "models/base_qwen"
-  # Use bfloat16 for training stability on modern GPUs; avoids fp16 overflow
   torch_dtype: "bfloat16"
-  attn_implementation: "sdpa"
-  # Do NOT load in 4bit here; LoRA + bf16 is cleaner for SFT quality
+  attn_implementation: "flash_attention_2"
   load_in_4bit: true
-  load_in_8bit: false
 
 lora:
-  # Target the attention & MLP projection layers for maximum plasticity
-  # on the MoE model's expert routing stays frozen to preserve base capacity
   target_modules:
     - "q_proj"
     - "k_proj"
     - "v_proj"
     - "o_proj"
+  r: 64
+  lora_alpha: 128
+  expert_target_modules:
     - "gate_proj"
     - "up_proj"
     - "down_proj"
-  r: 64                      # Rank: high rank for complex domain adaptation
-  lora_alpha: 128            # Alpha = 2x rank is a stable default
-  lora_dropout: 0.0
+  expert_r: 8
+  expert_alpha: 16
+  lora_dropout: 0.1
   bias: "none"
   task_type: "CAUSAL_LM"
 
@@ -42,15 +33,14 @@ data:
   datasets:
     - "herald.jsonl"
     - "lean_workbook.jsonl"
-  # Max token length. Lean 4 statements can be moderately long.
-  max_seq_length: 1024
-  # Proportion of data to hold out for validation
-  val_split: 0.02
-  # Number of DataLoader worker processes
-  num_workers: 4
+  max_seq_length: 512
+  val_split: 0.01
+  # Light syntax alignment: subsample instead of training on all 720k pairs.
+  # Set to 0 to use the full corpus.
+  max_train_samples: 40000
+  num_workers: 40
 
 prompt:
-  # System prompt that frames the model's autoformalization task
   system: >
     You are an expert mathematician and Lean 4 programmer. Your task is to
     translate informal mathematical statements into formal Lean 4 theorem
@@ -58,34 +48,30 @@ prompt:
 
 training:
   output_dir: "models/sft_checkpoints"
-  num_train_epochs: 3
-  # Effective batch size = per_device_batch_size * gradient_accumulation_steps
-  # 2 * 16 = 32 effective batch size; fits in 32GB VRAM with LoRA + bf16
-  per_device_train_batch_size: 2
-  per_device_eval_batch_size: 2
-  gradient_accumulation_steps: 16
-  # AdamW with weight decay; cosine schedule for smooth convergence
-  learning_rate: 2.0e-4
+  # 1 epoch for syntax alignment; raise only if eval_loss is still falling.
+  num_train_epochs: 1
+  # bs=2 peaks ~26 GB (bs=4 hit 30 GB — too tight with eval + variable lengths).
+  # The MoE per-expert loop is launch-bound, so batching amortizes it: bs 1->4
+  # gave 3.5x throughput for ~equal wall-time. Effective batch = 2 * 8 = 16.
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 2
+  learning_rate: 6.0e-5
   lr_scheduler_type: "cosine"
-  warmup_ratio: 0.05
+  warmup_steps: 100
   weight_decay: 0.01
   max_grad_norm: 1.0
-  # Mixed precision: bf16 preferred for Ampere+ GPUs
   bf16: true
   fp16: false
-  # Evaluation & checkpointing strategy
   eval_strategy: "steps"
-  eval_steps: 500
+  eval_steps: 25
   save_strategy: "steps"
-  save_steps: 500
+  save_steps: 25
   save_total_limit: 3
   load_best_model_at_end: true
   metric_for_best_model: "eval_loss"
   greater_is_better: false
-  # Logging
-  logging_steps: 25
+  logging_steps: 10
   report_to: "wandb"
-  # Packing short sequences together improves GPU utilization
-  packing: true
-  # DataCollator: train only on the completion (formal_statement)
-  response_only_masking: true
+  optim: "paged_adamw_8bit"
+  max_steps: -1

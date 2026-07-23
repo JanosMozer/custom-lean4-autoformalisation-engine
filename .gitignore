@@ -4,3 +4,4 @@ data/
 models/
 venv/
 wandb/
+scratch_flash_attn

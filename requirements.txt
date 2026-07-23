@@ -1,8 +1,11 @@
-torch
-transformers
-trl
-peft
+# Pinned to the versions validated on the RTX 5090 (Blackwell, sm_120).
+torch==2.13.0
+transformers==5.14.1
+trl==1.8.0
+peft==0.19.1
 datasets
+accelerate==1.14.0
 wandb
 pexpect
-bitsandbytes>=0.46.1
+bitsandbytes==0.49.2
+flash-attn==2.8.4
