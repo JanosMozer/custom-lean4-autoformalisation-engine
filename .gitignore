@@ -1,7 +1,9 @@
 .agents/
+.claude/
 .env/
 data/
 models/
 venv/
 wandb/
 scratch_flash_attn
+leaneval/
