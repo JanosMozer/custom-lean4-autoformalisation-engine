@@ -7,3 +7,5 @@ venv/
 wandb/
 scratch_flash_attn
 leaneval/
+syntaxtuning/*.pyc
+repl_tool/

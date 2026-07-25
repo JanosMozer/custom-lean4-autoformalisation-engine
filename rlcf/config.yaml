@@ -1,0 +1,57 @@
+run:
+  project: "mesh-autoformalizer"
+  entity: "mozerjanos4-budapesti-m-szaki-s-gazdas-gtudom-nyi-egyetem"
+  group: "rlcf"
+  seed: 42
+
+# Same base as Stage 1; whole model NF4 on GPU (see syntaxtuning loader).
+model:
+  base_path: "models/base_qwen"
+  torch_dtype: "bfloat16"
+  attn_implementation: "flash_attention_2"
+  load_in_4bit: true
+
+# Continue from the workbook-RLCF policy for the hard miniF2F push.
+adapter_path: "models/saved/rlcf-leanworkbook-checkpoint-200"
+
+data:
+  # Hard push: competition-level problems.
+  path: "data/rlcf/minif2f.jsonl"
+  max_samples: 0
+  system: >
+    You are an expert mathematician and Lean 4 programmer. Translate the informal
+    statement into a single formal Lean 4 theorem statement ending in ':= by sorry'.
+    Output only Lean 4 code.
+
+lean:
+  mathlib_project: "leaneval"
+  repl_bin: "repl_tool/.lake/build/bin/repl"  # persistent Mathlib REPL; falls back to cold lean
+  header: "import Mathlib"
+  timeout: 60
+  num_workers: 16          # persistent REPL workers / parallel type-checks
+  # Gated reward: well-formed-only -> r_wellformed; compiles -> w_compile + w_faithful*similarity.
+  r_wellformed: 0.1
+  w_compile: 0.3
+  w_faithful: 0.7
+
+training:
+  output_dir: "models/rlcf_checkpoints"
+  num_generations: 4            # completions sampled per prompt (group for GRPO)
+  per_device_train_batch_size: 4  # must be divisible by num_generations
+  gradient_accumulation_steps: 8  # effective 32 samples / update
+  max_completion_length: 160    # statements are short (mean ~70 tok); caps KV/activation memory
+  temperature: 1.3             # restore exploration (entropy collapsed to ~0.2 on workbook)
+  beta: 0.04                    # more KL regularization to curb further entropy collapse
+  learning_rate: 5.0e-6
+  lr_scheduler_type: "cosine"
+  warmup_steps: 5
+  max_grad_norm: 0.2
+  num_train_epochs: 1
+  max_steps: -1
+  bf16: true
+  optim: "paged_adamw_8bit"
+  logging_steps: 1
+  save_strategy: "steps"
+  save_steps: 50
+  save_total_limit: 3
+  report_to: "wandb"

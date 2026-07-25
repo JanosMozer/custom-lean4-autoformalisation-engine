@@ -1,0 +1,7 @@
+python proofnet_eval/eval.py --adapter models/rlcf_checkpoints/rlcf-leanworkbook-checkpoint-200 --split test --n 50
+
+pre minif2f: ============================================================
+ProofNet test  (n=50)
+  well-formed:   49/50 = 98.0%
+  type-checks:   18/50 = 36.0%
+  faithfulness:  0.624 (mean structural similarity to gold)
