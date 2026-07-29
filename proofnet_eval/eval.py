@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -105,13 +106,21 @@ def main():
     def check(i, code):
         return pool.run(opens[i] + "\n" + strip_imports(code))
 
+    gen_stats = {"tokens": 0, "time": 0.0}
+
     def generate(msgs_list):
         prompts = [tok.apply_chat_template(m, tokenize=False, add_generation_prompt=True) for m in msgs_list]
         enc = tok(prompts, return_tensors="pt", padding=True, add_special_tokens=False).to("cuda")
+        torch.cuda.synchronize()
+        t0 = time.time()
         with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
             out = model.generate(**enc, max_new_tokens=args.max_new_tokens, do_sample=False,
                                  pad_token_id=tok.pad_token_id)
-        return [_clean_code(x) for x in tok.batch_decode(out[:, enc.input_ids.shape[1]:], skip_special_tokens=True)]
+        torch.cuda.synchronize()
+        new = out[:, enc.input_ids.shape[1]:]
+        gen_stats["tokens"] += int((new != tok.pad_token_id).sum())
+        gen_stats["time"] += time.time() - t0
+        return [_clean_code(x) for x in tok.batch_decode(new, skip_special_tokens=True)]
 
     def gen_all(msgs_list):  # batch across problems
         res = []
@@ -183,6 +192,15 @@ def main():
     print(f"  goal-exact-match:   {pct(goal_exact)}  (semantic: same elaborated goal as gold)")
     print(f"  gold-compiles:      {pct(sum(1 for g in gold_goals if g is not None))}  (sanity: gold type-checks here)")
     print(f"  error-breakdown (unsolved): {dict(errs)}")
+    tps = gen_stats["tokens"] / gen_stats["time"] if gen_stats["time"] else 0
+    print(f"  throughput:         {tps:.1f} tok/s ({gen_stats['tokens']} tok / {gen_stats['time']:.1f}s gen)")
+
+    print("\n" + "=" * 64 + "\nSAMPLES (informal / model / gold):\n")
+    for i in range(min(5, n)):
+        tag = f"solved@{solved_at[i]}" if solved_at[i] else "UNSOLVED"
+        print(f"[{tag}] {rows[i]['informal_statement'][:150]}")
+        print(f"  model: {codes[i].strip()[:280]}")
+        print(f"  gold : {rows[i]['formal_statement'].strip()[:280]}\n")
 
 
 if __name__ == "__main__":

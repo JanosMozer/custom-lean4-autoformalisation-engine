@@ -64,6 +64,7 @@ class LoRAConfig:
     lora_dropout: float = 0.0
     bias: str = "none"
     task_type: str = "CAUSAL_LM"
+    use_dora: bool = True  # DoRA: weight-decomposed adaptation (magnitude + direction)
 
 
 @dataclass
@@ -414,6 +415,7 @@ def build_lora_config(lora_cfg: LoRAConfig) -> LoraConfig:
         alpha_pattern=alpha_pattern,
         lora_dropout=lora_cfg.lora_dropout,
         bias=lora_cfg.bias,
+        use_dora=lora_cfg.use_dora,  # QDoRA on the 4-bit base
         inference_mode=False,
     )
 
@@ -506,8 +508,8 @@ def build_trainer(
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(
-        f"LoRA applied: {trainable_params:,} trainable / {total_params:,} total "
-        f"({100 * trainable_params / total_params:.2f}%)"
+        f"{'DoRA' if lora_config.use_dora else 'LoRA'} applied: {trainable_params:,} trainable / "
+        f"{total_params:,} total ({100 * trainable_params / total_params:.2f}%)"
     )
 
     collator = DataCollatorForSeq2Seq(tokenizer, padding="longest", label_pad_token_id=-100)

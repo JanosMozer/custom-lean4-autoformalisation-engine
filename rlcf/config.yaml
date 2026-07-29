@@ -12,12 +12,13 @@ model:
   load_in_4bit: true
 
 # Continue from the workbook-RLCF policy for the hard miniF2F push.
-adapter_path: "models/saved/rlcf-leanworkbook-checkpoint-200"
+# RL continues (and thus inherits the method — DoRA — of) the Stage-1 adapter.
+adapter_path: "models/sft_checkpoints/checkpoint-1650"
 
 data:
-  # Hard push: competition-level problems.
-  path: "data/rlcf/minif2f.jsonl"
-  max_samples: 0
+  # Breadth/stabilization pool (easier) for the first RLCF phase.
+  path: "data/syntax/lean_workbook.jsonl"
+  max_samples: 3000
   system: >
     You are an expert mathematician and Lean 4 programmer. Translate the informal
     statement into a single formal Lean 4 theorem statement ending in ':= by sorry'.
@@ -36,17 +37,17 @@ lean:
 
 training:
   output_dir: "models/rlcf_checkpoints"
-  num_generations: 4            # completions sampled per prompt (group for GRPO)
+  num_generations: 8          # completions sampled per prompt (group for GRPO)
   per_device_train_batch_size: 4  # must be divisible by num_generations
   gradient_accumulation_steps: 8  # effective 32 samples / update
   max_completion_length: 160    # statements are short (mean ~70 tok); caps KV/activation memory
-  temperature: 1.3             # restore exploration (entropy collapsed to ~0.2 on workbook)
-  beta: 0.04                    # more KL regularization to curb further entropy collapse
+  temperature: 1.2
+  beta: 0.02
   learning_rate: 5.0e-6
   lr_scheduler_type: "cosine"
   warmup_steps: 5
   max_grad_norm: 0.2
-  num_train_epochs: 1
+  num_train_epochs: 2
   max_steps: -1
   bf16: true
   optim: "paged_adamw_8bit"

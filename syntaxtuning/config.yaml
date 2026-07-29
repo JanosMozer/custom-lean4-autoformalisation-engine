@@ -27,6 +27,7 @@ lora:
   lora_dropout: 0.1
   bias: "none"
   task_type: "CAUSAL_LM"
+  use_dora: true          # DoRA instead of LoRA (QDoRA on the NF4 base)
 
 data:
   syntax_dir: "data/syntax"
