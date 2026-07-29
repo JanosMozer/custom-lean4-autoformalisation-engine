@@ -9,3 +9,4 @@ wandb
 pexpect
 bitsandbytes==0.49.2
 flash-attn==2.8.4
+sentence-transformers

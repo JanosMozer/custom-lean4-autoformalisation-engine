@@ -40,6 +40,8 @@ from peft import PeftModel
 from syntaxtuning._config import ModelConfig, load_model_and_tokenizer
 from rlcf._config import _clean_code, _faithfulness, _is_wellformed
 from rlcf.lean_server import make_pool
+from retrieval.retriever import load_retriever
+from retrieval.augment import augment_user, repair_context
 
 SYSTEM = ("You are an expert mathematician and Lean 4 programmer. Translate the informal "
           "statement into a single formal Lean 4 theorem statement ending in ':= by sorry'. "
@@ -86,7 +88,10 @@ def main():
     ap.add_argument("--mathlib-project", default="leaneval")
     ap.add_argument("--repl-bin", default="repl_tool/.lake/build/bin/repl")
     ap.add_argument("--max-new-tokens", type=int, default=512)
+    ap.add_argument("--use-retrieval", action="store_true", help="Enable A+B Mathlib retrieval.")
+    ap.add_argument("--index-dir", default="retrieval/index")
     args = ap.parse_args()
+    retriever = load_retriever(args.index_dir) if args.use_retrieval else None
 
     torch.set_num_threads(os.cpu_count() or 8)
     model, tok = load_model_and_tokenizer(ModelConfig(base_path=args.model))
@@ -137,7 +142,7 @@ def main():
 
     # Initial generation.
     codes = gen_all([[{"role": "system", "content": SYSTEM},
-                      {"role": "user", "content": r["informal_statement"]}] for r in rows])
+                      {"role": "user", "content": augment_user(r["informal_statement"], retriever)}] for r in rows])
     solved_at = [None] * n
     gen_goals = [None] * n
     last_err = [[] for _ in range(n)]
@@ -159,10 +164,11 @@ def main():
               f"(+{len(idx) - len(fails)} this iter)", flush=True)
         if it < args.max_iters and fails:
             repairs = [[{"role": "system", "content": SYSTEM},
-                        {"role": "user", "content": rows[i]["informal_statement"]},
+                        {"role": "user", "content": augment_user(rows[i]["informal_statement"], retriever)},
                         {"role": "assistant", "content": codes[i]},
                         {"role": "user", "content": "It failed to compile:\n" +
-                         "\n".join(last_err[i])[:800] +
+                         "\n".join(last_err[i])[:800] + "\n" +
+                         repair_context(last_err[i], retriever) +
                          "\nOutput a corrected Lean 4 theorem statement only."}] for i in fails]
             for i, c in zip(fails, gen_all(repairs)):
                 codes[i] = c
