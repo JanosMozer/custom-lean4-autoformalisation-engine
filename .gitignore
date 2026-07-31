@@ -9,3 +9,6 @@ scratch_flash_attn
 leaneval/
 syntaxtuning/*.pyc
 repl_tool/
+__pycache__/
+*.pyc
+__init__.py

@@ -1,0 +1,391 @@
+{
+  "benchmark": "ProofNet",
+  "split": "test",
+  "models": {
+    "qwen-lora-prominif2f-vF": {
+      "adapter": "models/rlcf_checkpoints/final",
+      "n_samples": 100,
+      "well_formed": {
+        "count": 99,
+        "total": 100,
+        "percentage": 99.0
+      },
+      "compile_at_k": {
+        "compile@1": {
+          "count": 38,
+          "total": 100,
+          "percentage": 38.0
+        },
+        "compile@2": {
+          "count": 53,
+          "total": 100,
+          "percentage": 53.0
+        },
+        "compile@3": {
+          "count": 59,
+          "total": 100,
+          "percentage": 59.0
+        },
+        "compile@4": {
+          "count": 60,
+          "total": 100,
+          "percentage": 60.0
+        },
+        "compile@5": {
+          "count": 63,
+          "total": 100,
+          "percentage": 63.0
+        }
+      },
+      "pass_at_5_final": {
+        "count": 63,
+        "total": 100,
+        "percentage": 63.0
+      },
+      "mean_iters_solved": 1.67,
+      "faithfulness_code": 0.639,
+      "goal_similarity": null,
+      "goal_exact_match": {
+        "count": 0,
+        "total": 100,
+        "percentage": 0.0
+      },
+      "gold_compiles": {
+        "count": 0,
+        "total": 100,
+        "percentage": 0.0
+      },
+      "error_breakdown_unsolved": {
+        "unknown_ident": 5,
+        "syntax": 20,
+        "other": 4,
+        "typeclass": 8
+      },
+      "throughput": {
+        "tokens_per_sec": 6.8
+      }
+    },
+    "qwen-lora-proleanworkbook-vF": {
+      "adapter": "models/saved/qwen-lora-proleanworkbook-vF",
+      "n_samples": 100,
+      "well_formed": {
+        "count": 99,
+        "total": 100,
+        "percentage": 99.0
+      },
+      "compile_at_k": {
+        "compile@1": {
+          "count": 34,
+          "total": 100,
+          "percentage": 34.0
+        },
+        "compile@2": {
+          "count": 53,
+          "total": 100,
+          "percentage": 53.0
+        },
+        "compile@3": {
+          "count": 57,
+          "total": 100,
+          "percentage": 57.0
+        },
+        "compile@4": {
+          "count": 59,
+          "total": 100,
+          "percentage": 59.0
+        },
+        "compile@5": {
+          "count": 59,
+          "total": 100,
+          "percentage": 59.0
+        }
+      },
+      "pass_at_5_final": {
+        "count": 59,
+        "total": 100,
+        "percentage": 59.0
+      },
+      "mean_iters_solved": 1.56,
+      "faithfulness_code": 0.633,
+      "goal_similarity": null,
+      "goal_exact_match": {
+        "count": 0,
+        "total": 100,
+        "percentage": 0.0
+      },
+      "gold_compiles": {
+        "count": 0,
+        "total": 100,
+        "percentage": 0.0
+      },
+      "error_breakdown_unsolved": {
+        "unknown_ident": 8,
+        "typeclass": 9,
+        "syntax": 19,
+        "other": 5
+      },
+      "throughput": {
+        "tokens_per_sec": 7.0
+      }
+    },
+    "qwen-lora-prosyntax-vF": {
+      "adapter": "models/saved/qwen-lora-prosyntax-vF",
+      "n_samples": 100,
+      "well_formed": {
+        "count": 96,
+        "total": 100,
+        "percentage": 96.0
+      },
+      "compile_at_k": {
+        "compile@1": {
+          "count": 31,
+          "total": 100,
+          "percentage": 31.0
+        },
+        "compile@2": {
+          "count": 39,
+          "total": 100,
+          "percentage": 39.0
+        },
+        "compile@3": {
+          "count": 41,
+          "total": 100,
+          "percentage": 41.0
+        },
+        "compile@4": {
+          "count": 42,
+          "total": 100,
+          "percentage": 42.0
+        },
+        "compile@5": {
+          "count": 44,
+          "total": 100,
+          "percentage": 44.0
+        }
+      },
+      "pass_at_5_final": {
+        "count": 44,
+        "total": 100,
+        "percentage": 44.0
+      },
+      "mean_iters_solved": 1.52,
+      "faithfulness_code": 0.469,
+      "goal_similarity": null,
+      "goal_exact_match": {
+        "count": 0,
+        "total": 100,
+        "percentage": 0.0
+      },
+      "gold_compiles": {
+        "count": 0,
+        "total": 100,
+        "percentage": 0.0
+      },
+      "error_breakdown_unsolved": {
+        "unknown_ident": 17,
+        "typeclass": 11,
+        "syntax": 24,
+        "other": 3,
+        "empty": 1
+      },
+      "throughput": {
+        "tokens_per_sec": 6.5
+      }
+    },
+    "qwen-dora-postminif2f-vF": {
+      "adapter": "models/saved/qwen-dora-postminif2f-vF/",
+      "n_samples": 50,
+      "well_formed": {
+        "count": 49,
+        "total": 50,
+        "percentage": 98.0
+      },
+      "compile_at_k": {
+        "compile@1": {
+          "count": 18,
+          "total": 50,
+          "percentage": 36.0
+        },
+        "compile@2": {
+          "count": 27,
+          "total": 50,
+          "percentage": 54.0
+        },
+        "compile@3": {
+          "count": 29,
+          "total": 50,
+          "percentage": 58.0
+        },
+        "compile@4": {
+          "count": 31,
+          "total": 50,
+          "percentage": 62.0
+        },
+        "compile@5": {
+          "count": 32,
+          "total": 50,
+          "percentage": 64.0
+        }
+      },
+      "pass_at_5_final": {
+        "count": 32,
+        "total": 50,
+        "percentage": 64.0
+      },
+      "mean_iters_solved": 1.72,
+      "faithfulness_code": 0.623,
+      "goal_similarity": null,
+      "goal_exact_match": {
+        "count": 0,
+        "total": 50,
+        "percentage": 0.0
+      },
+      "gold_compiles": {
+        "count": 0,
+        "total": 50,
+        "percentage": 0.0
+      },
+      "error_breakdown_unsolved": {
+        "unknown_ident": 6,
+        "typeclass": 5,
+        "syntax": 4,
+        "other": 3
+      },
+      "throughput": {
+        "tokens_per_sec": 3.2,
+        "total_tokens": 12292,
+        "generation_time_seconds": 3784.9
+      }
+    },
+    "qwen-dora-postleanworkbook-vF": {
+      "adapter": "models/saved/qwen_dora_postleanworkbook_vF/",
+      "n_samples": 50,
+      "well_formed": {
+        "count": 49,
+        "total": 50,
+        "percentage": 98.0
+      },
+      "compile_at_k": {
+        "compile@1": {
+          "count": 17,
+          "total": 50,
+          "percentage": 34.0
+        },
+        "compile@2": {
+          "count": 26,
+          "total": 50,
+          "percentage": 52.0
+        },
+        "compile@3": {
+          "count": 29,
+          "total": 50,
+          "percentage": 58.0
+        },
+        "compile@4": {
+          "count": 29,
+          "total": 50,
+          "percentage": 58.0
+        },
+        "compile@5": {
+          "count": 29,
+          "total": 50,
+          "percentage": 58.0
+        }
+      },
+      "pass_at_5_final": {
+        "count": 29,
+        "total": 50,
+        "percentage": 58.0
+      },
+      "mean_iters_solved": 1.52,
+      "faithfulness_code": 0.603,
+      "goal_similarity": null,
+      "goal_exact_match": {
+        "count": 0,
+        "total": 50,
+        "percentage": 0.0
+      },
+      "gold_compiles": {
+        "count": 0,
+        "total": 50,
+        "percentage": 0.0
+      },
+      "error_breakdown_unsolved": {
+        "unknown_ident": 8,
+        "syntax": 5,
+        "other": 3,
+        "typeclass": 5
+      },
+      "throughput": {
+        "tokens_per_sec": 3.0,
+        "total_tokens": 12832,
+        "generation_time_seconds": 4250.3
+      }
+    },
+    "qwen-dora-postsyntax-vF": {
+      "adapter": "models/saved/qwen_dora_postsyntax_vF/",
+      "n_samples": 50,
+      "well_formed": {
+        "count": 50,
+        "total": 50,
+        "percentage": 100.0
+      },
+      "compile_at_k": {
+        "compile@1": {
+          "count": 16,
+          "total": 50,
+          "percentage": 32.0
+        },
+        "compile@2": {
+          "count": 22,
+          "total": 50,
+          "percentage": 44.0
+        },
+        "compile@3": {
+          "count": 23,
+          "total": 50,
+          "percentage": 46.0
+        },
+        "compile@4": {
+          "count": 24,
+          "total": 50,
+          "percentage": 48.0
+        },
+        "compile@5": {
+          "count": 24,
+          "total": 50,
+          "percentage": 48.0
+        }
+      },
+      "pass_at_5_final": {
+        "count": 24,
+        "total": 50,
+        "percentage": 48.0
+      },
+      "mean_iters_solved": 1.46,
+      "faithfulness_code": 0.484,
+      "goal_similarity": null,
+      "goal_exact_match": {
+        "count": 0,
+        "total": 50,
+        "percentage": 0.0
+      },
+      "gold_compiles": {
+        "count": 0,
+        "total": 50,
+        "percentage": 0.0
+      },
+      "error_breakdown_unsolved": {
+        "unknown_ident": 11,
+        "syntax": 9,
+        "other": 5,
+        "typeclass": 1
+      },
+      "throughput": {
+        "tokens_per_sec": 3.0,
+        "total_tokens": 15895,
+        "generation_time_seconds": 5245.8
+      }
+    }
+  }
+}

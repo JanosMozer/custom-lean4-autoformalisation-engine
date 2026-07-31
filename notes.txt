@@ -184,3 +184,186 @@ Qwen3-Coder-30B-A3B-Instruct
 
 
 bash rlcr/main.sh rlcf_dora_1
+qwen-dora-postminif2f-vF
+================================================================
+ProofNet test  (n=50, adapter=models/saved/qwen-dora-postminif2f-vF/)
+  well-formed:        49/50 = 98.0%
+  compile@1:          18/50 = 36.0%
+  compile@2:          27/50 = 54.0%
+  compile@3:          29/50 = 58.0%
+  compile@4:          31/50 = 62.0%
+  compile@5:          32/50 = 64.0%
+  pass@5 (final):     32/50 = 64.0%
+  mean-iters-solved:  1.72
+  faithfulness(code): 0.623
+  goal-similarity:    n/a
+  goal-exact-match:   0/50 = 0.0%  (semantic: same elaborated goal as gold)
+  gold-compiles:      0/50 = 0.0%  (sanity: gold type-checks here)
+  error-breakdown (unsolved): {'unknown_ident': 6, 'typeclass': 5, 'syntax': 4, 'other': 3}
+  throughput:         3.2 tok/s (12292 tok / 3784.9s gen)
+
+================================================================
+SAMPLES (informal / model / gold):
+
+[UNSOLVED] Suppose that $f$ is holomorphic in an open set $\Omega$. Prove that if $\text{Im}(f)$ is constant, then $f$ is constant.
+  model: theorem lean_workbook_plus_67501 (f : ℂ → ℂ) (hf : HolomorphicOn f (Set.univ : Set ℂ)) (h : ∀ z ∈ Set.univ, (f z).im = c) : ∃ l, ∀ z ∈ Set.univ, f z = l := sorry
+  gold : theorem exercise_1_13b {f : ℂ → ℂ} (Ω : Set ℂ) (a b : Ω) (h : IsOpen Ω)
+  (hf : DifferentiableOn ℂ f Ω) (hc : ∃ (c : ℝ), ∀ z ∈ Ω, (f z).im = c) :
+  f a = f b :=
+
+[solved@2] Prove that the power series $\sum nz^n$ does not converge on any point of the unit circle.
+  model: theorem lean_workbook_plus_67231 : ¬ ∃ z : ℂ, ‖z‖ = 1 ∧ Summable (fun n => n * z ^ n) := by sorry
+  gold : theorem exercise_1_19a (z : ℂ) (hz : abs z = 1) (s : ℕ → ℂ)
+    (h : s = (λ n => ∑ i in (range n), i * z ^ i)) :
+    ¬ ∃ y, Tendsto s atTop (𝓝 y) :=
+
+[solved@1] Prove that the power series $\sum zn/n$ converges at every point of the unit circle except $z = 1$.
+  model: theorem lean_workbook_plus_62783 (z : ℂ) (hz : ‖z‖ = 1) (hz1 : z ≠ 1) : ∑' n : ℕ, (z ^ n / n) = -Complex.log (1 - z) := sorry
+  gold : theorem exercise_1_19c (z : ℂ) (hz : abs z = 1) (hz2 : z ≠ 1) (s : ℕ → ℂ)
+    (h : s = (λ n => ∑ i in (range n), i * z / i)) :
+    ∃ z, Tendsto s atTop (𝓝 z) :=
+
+[solved@1] Show that $\int_{0}^{\infty} \frac{\sin x}{x} d x=\frac{\pi}{2}$.
+  model: theorem lean_workbook_plus_67351 : ∫ (x : ℝ) in Set.Ici 0, Real.sin x / x = π / 2 := by sorry
+  gold : theorem exercise_2_2 :
+  Tendsto (λ y => ∫ x in (0 : ℝ)..y, Real.sin x / x) atTop (𝓝 (Real.pi / 2)) :=
+
+[UNSOLVED] Suppose $f$ is an analytic function defined everywhere in $\mathbb{C}$ and such that for each $z_0 \in \mathbb{C}$ at least one coefficient in the exp
+  model: theorem extract_aug_526178 (f : ℂ → ℂ) (hf : ∀ z : ℂ, ∃ n : ℕ, (fun n => ((f - f z) / (fun x => (x - z) ^ n)) z) n = 0) : ∃ p : Polynomial ℂ, ∀ z : ℂ, f z = p.eval z := by sorry
+  gold : theorem exercise_2_13 {f : ℂ → ℂ}
+    (hf : ∀ z₀ : ℂ, ∃ (s : Set ℂ) (c : ℕ → ℂ), IsOpen s ∧ z₀ ∈ s ∧
+      ∀ z ∈ s, Tendsto (λ n => ∑ i in range n, (c i) * (z - z₀)^i) atTop (𝓝 (f z₀))
+      ∧ ∃ i, c i = 0) :
+    ∃ (c : ℕ → ℂ) (n : ℕ), f = λ z => ∑ i in range n, (c i) * z ^ n :=
+
+
+qwen-dora-postleanworkbook-vF
+================================================================
+ProofNet test  (n=50, adapter=models/saved/qwen_dora_postleanworkbook_vF/)
+  well-formed:        49/50 = 98.0%
+  compile@1:          17/50 = 34.0%
+  compile@2:          26/50 = 52.0%
+  compile@3:          29/50 = 58.0%
+  compile@4:          29/50 = 58.0%
+  compile@5:          29/50 = 58.0%
+  pass@5 (final):     29/50 = 58.0%
+  mean-iters-solved:  1.52
+  faithfulness(code): 0.603
+  goal-similarity:    n/a
+  goal-exact-match:   0/50 = 0.0%  (semantic: same elaborated goal as gold)
+  gold-compiles:      0/50 = 0.0%  (sanity: gold type-checks here)
+  error-breakdown (unsolved): {'unknown_ident': 8, 'syntax': 5, 'other': 3, 'typeclass': 5}
+  throughput:         3.0 tok/s (12832 tok / 4250.3s gen)
+
+================================================================
+SAMPLES (informal / model / gold):
+
+[UNSOLVED] Suppose that $f$ is holomorphic in an open set $\Omega$. Prove that if $\text{Im}(f)$ is constant, then $f$ is constant.
+  model: theorem lean_workbook_plus_67821 (f : ℂ → ℂ) (hf: HolomorphicOn f (Set.univ : Set ℂ)) (h : ∀ z ∈ Set.univ, (f z).im = c) : ∃ l, ∀ z ∈ Set.univ, f z = l := sorry
+  gold : theorem exercise_1_13b {f : ℂ → ℂ} (Ω : Set ℂ) (a b : Ω) (h : IsOpen Ω)
+  (hf : DifferentiableOn ℂ f Ω) (hc : ∃ (c : ℝ), ∀ z ∈ Ω, (f z).im = c) :
+  f a = f b :=
+
+[solved@3] Prove that the power series $\sum nz^n$ does not converge on any point of the unit circle.
+  model: theorem lean_workbook_plus_62087 : ¬ ∃ z : ℂ, ‖z‖ = 1 ∧ ∑' n : ℕ, (n : ℂ) * z ^ n = 0 := by sorry
+  gold : theorem exercise_1_19a (z : ℂ) (hz : abs z = 1) (s : ℕ → ℂ)
+    (h : s = (λ n => ∑ i in (range n), i * z ^ i)) :
+    ¬ ∃ y, Tendsto s atTop (𝓝 y) :=
+
+[solved@1] Prove that the power series $\sum zn/n$ converges at every point of the unit circle except $z = 1$.
+  model: theorem lean_workbook_plus_62703 (z : ℂ) (hz : ‖z‖ = 1) (hz1 : z ≠ 1) : ∑' n : ℕ, (z^n / n) = -Complex.log (1 - z) := sorry
+  gold : theorem exercise_1_19c (z : ℂ) (hz : abs z = 1) (hz2 : z ≠ 1) (s : ℕ → ℂ)
+    (h : s = (λ n => ∑ i in (range n), i * z / i)) :
+    ∃ z, Tendsto s atTop (𝓝 z) :=
+
+[UNSOLVED] Show that $\int_{0}^{\infty} \frac{\sin x}{x} d x=\frac{\pi}{2}$.
+  model: theorem lean_workbook_plus_13576 : ∫ (x : ℝ) in 0..∞, Real.sin x / x = π / 2 := by sorry
+  gold : theorem exercise_2_2 :
+  Tendsto (λ y => ∫ x in (0 : ℝ)..y, Real.sin x / x) atTop (𝓝 (Real.pi / 2)) :=
+
+[UNSOLVED] Suppose $f$ is an analytic function defined everywhere in $\mathbb{C}$ and such that for each $z_0 \in \mathbb{C}$ at least one coefficient in the exp
+  model: theorem extract_aug_523167 (f : ℂ → ℂ) (hf : HolomorphicOn f univ) (h : ∀ z₀ : ℂ, ∃ n : ℕ, (fun n => ((z₀ - ·) ^ n).deriv^[n] f) n = 0) : ∃ p : Polynomial ℂ, ∀ z : ℂ, f z = p.eval z := sorry
+  gold : theorem exercise_2_13 {f : ℂ → ℂ}
+    (hf : ∀ z₀ : ℂ, ∃ (s : Set ℂ) (c : ℕ → ℂ), IsOpen s ∧ z₀ ∈ s ∧
+      ∀ z ∈ s, Tendsto (λ n => ∑ i in range n, (c i) * (z - z₀)^i) atTop (𝓝 (f z₀))
+      ∧ ∃ i, c i = 0) :
+    ∃ (c : ℕ → ℂ) (n : ℕ), f = λ z => ∑ i in range n, (c i) * z ^ n :=
+
+
+
+qwen-dora-postsyntax-vF
+================================================================
+ProofNet test  (n=50, adapter=models/saved/qwen_dora_postsyntax_vF/)
+  well-formed:        50/50 = 100.0%
+  compile@1:          16/50 = 32.0%
+  compile@2:          22/50 = 44.0%
+  compile@3:          23/50 = 46.0%
+  compile@4:          24/50 = 48.0%
+  compile@5:          24/50 = 48.0%
+  pass@5 (final):     24/50 = 48.0%
+  mean-iters-solved:  1.46
+  faithfulness(code): 0.484
+  goal-similarity:    n/a
+  goal-exact-match:   0/50 = 0.0%  (semantic: same elaborated goal as gold)
+  gold-compiles:      0/50 = 0.0%  (sanity: gold type-checks here)
+  error-breakdown (unsolved): {'unknown_ident': 11, 'syntax': 9, 'other': 5, 'typeclass': 1}
+  throughput:         3.0 tok/s (15895 tok / 5245.8s gen)
+
+================================================================
+SAMPLES (informal / model / gold):
+
+[UNSOLVED] Suppose that $f$ is holomorphic in an open set $\Omega$. Prove that if $\text{Im}(f)$ is constant, then $f$ is constant.
+  model: import Mathlib
+open scoped ComplexConjugate
+open Topology Filter Set
+open Complex
+open ComplexConjugate
+theorem const_of_im_const {f : ℂ → ℂ} (hf : HolomorphicOn f Ω) (h : ∀ z ∈ Ω, im (f z) = c) :
+    ∃ l, ∀ z ∈ Ω, f z = l := sorry
+  gold : theorem exercise_1_13b {f : ℂ → ℂ} (Ω : Set ℂ) (a b : Ω) (h : IsOpen Ω)
+  (hf : DifferentiableOn ℂ f Ω) (hc : ∃ (c : ℝ), ∀ z ∈ Ω, (f z).im = c) :
+  f a = f b :=
+
+[solved@1] Prove that the power series $\sum nz^n$ does not converge on any point of the unit circle.
+  model: import Mathlib
+open scoped Classical
+open Topology Filter Set
+open Lean.Meta Qq
+open Real
+open Real NNReal
+open Real
+theorem not_convergent_on_unit_circle {z : ℂ} (hz : ‖z‖ = 1) :
+    ¬Summable fun n => n * z ^ n := by sorry
+  gold : theorem exercise_1_19a (z : ℂ) (hz : abs z = 1) (s : ℕ → ℂ)
+    (h : s = (λ n => ∑ i in (range n), i * z ^ i)) :
+    ¬ ∃ y, Tendsto s atTop (𝓝 y) :=
+
+[solved@3] Prove that the power series $\sum zn/n$ converges at every point of the unit circle except $z = 1$.
+  model: theorem lean_workbook_plus_52076 : ∀ z : ℂ, ‖z‖ = 1 → z ≠ 1 → ∑' n : ℕ, (z ^ n / n) = -Complex.log (1 - z) := sorry
+  gold : theorem exercise_1_19c (z : ℂ) (hz : abs z = 1) (hz2 : z ≠ 1) (s : ℕ → ℂ)
+    (h : s = (λ n => ∑ i in (range n), i * z / i)) :
+    ∃ z, Tendsto s atTop (𝓝 z) :=
+
+[UNSOLVED] Show that $\int_{0}^{\infty} \frac{\sin x}{x} d x=\frac{\pi}{2}$.
+  model: import Mathlib
+open BigOperators
+open Real Nat Topology
+
+theorem extract_aug_516783 : ∫ (x : ℝ) in 0..∞, sin x / x = π / 2 := by sorry
+  gold : theorem exercise_2_2 :
+  Tendsto (λ y => ∫ x in (0 : ℝ)..y, Real.sin x / x) atTop (𝓝 (Real.pi / 2)) :=
+
+[UNSOLVED] Suppose $f$ is an analytic function defined everywhere in $\mathbb{C}$ and such that for each $z_0 \in \mathbb{C}$ at least one coefficient in the exp
+  model: import MathLib
+open scoped Topology Filter ENNReal
+open Set Metric Filter
+open ComplexConjugate
+open Polynomial
+theorem isPolynomial_of_coeff_zero {f : ℂ → ℂ} (hf : AnalyticOn ℂ f univ)
+    (h : ∀ z₀ : ℂ, ∃ n : ℕ, (fun n => ((f - eval₂ (fun x y => x ^ y) Cpow) z₀) n) n = 0) :
+   
+  gold : theorem exercise_2_13 {f : ℂ → ℂ}
+    (hf : ∀ z₀ : ℂ, ∃ (s : Set ℂ) (c : ℕ → ℂ), IsOpen s ∧ z₀ ∈ s ∧
+      ∀ z ∈ s, Tendsto (λ n => ∑ i in range n, (c i) * (z - z₀)^i) atTop (𝓝 (f z₀))
+      ∧ ∃ i, c i = 0) :
+    ∃ (c : ℕ → ℂ) (n : ℕ), f = λ z => ∑ i in range n, (c i) * z ^ n :=

@@ -13,12 +13,12 @@ model:
 
 # Continue from the workbook-RLCF policy for the hard miniF2F push.
 # RL continues (and thus inherits the method — DoRA — of) the Stage-1 adapter.
-adapter_path: "models/sft_checkpoints/checkpoint-1650"
+adapter_path: "models/saved/qwen_dora_postleanworkbook_vF"
 
 data:
-  # Breadth/stabilization pool (easier) for the first RLCF phase.
-  path: "data/syntax/lean_workbook.jsonl"
-  max_samples: 3000
+  # Hard push: competition-level problems.
+  path: "data/rlcf/minif2f.jsonl"
+  max_samples: 0
   system: >
     You are an expert mathematician and Lean 4 programmer. Translate the informal
     statement into a single formal Lean 4 theorem statement ending in ':= by sorry'.
@@ -40,7 +40,7 @@ training:
   num_generations: 8          # completions sampled per prompt (group for GRPO)
   per_device_train_batch_size: 4  # must be divisible by num_generations
   gradient_accumulation_steps: 8  # effective 32 samples / update
-  max_completion_length: 160    # statements are short (mean ~70 tok); caps KV/activation memory
+  max_completion_length: 220    # statements are short (mean ~70 tok); caps KV/activation memory
   temperature: 1.2
   beta: 0.02
   learning_rate: 5.0e-6
