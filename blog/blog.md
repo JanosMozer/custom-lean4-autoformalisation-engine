@@ -240,16 +240,23 @@ $$\text{Faithfulness}(c, g) = \text{SequenceMatcher}\left(\text{norm}(c), \text{
 ![Figure 5: Shift in compiler failure modes across training stages](./fig9_error_breakdown.png)
 *Figure 5: Shift in compiler failure modes across training stages. RLCF reduces missing identifier errors (`unknown_ident`) while syntax parsing errors dominate remaining unsolved instances.*
 
-### 8.1 MoE Single-GPU Compute Bottlenecks
+### 7.4 MoE Single-GPU Compute Bottlenecks
 While MoE models restrict active parameter computation to ~3B parameters per forward pass, running sparse MoE on a single GPU incurs fixed kernel launch overhead:
 - All 128 expert kernel branches execute sequentially or in small parallel launches per micro-batch.
 - Token packing (concatenating short sequences to length 1024) amortizes launch overhead, increasing throughput from <100 tok/s to **357 tok/s** during SFT training.
 
-### 8.2 Sequence Packing vs. Completion Masking Trade-Off
+### 7.5 Sequence Packing vs. Completion Masking Trade-Off
 - **Full Sequence Packing**: Maximizes GPU compute efficiency but forces training on prompt tokens unless complex custom cross-entropy attention masking is implemented.
 - **Completion-Only Masking**: Prevents policy drift on prompt tokens but leaves padding overhead when sequences vary in length.
 
 ---
+
+## 8. Conclusion
+
+The contribution is a purpose-built model-plus-agent architecture for Lean 4 autoformalization that runs on a single GPU. Sparse MoE inference (~3B active parameters), NF4 quantization, QLoRA adapters, and a persistent Lean REPL pool yield ~6.8–7.0 tok/s locally. That throughput supports multi-turn compiler repair and fast training/eval iteration without a cluster.
+
+Semantic exactness is not the strength of this stack (faithfulness ~0.63). Syntax and compilation are: well-formedness 98–100% on ProofNet, compile@5 of 63–64% after RLCF, and 100% well-formed / ~74% single-pass compile on leak-free miniF2F. Systems A/B retrieval plus the agent loop convert modest compile@1 into those pass@5 rates. The result is a locally runnable system that is useful on undergraduate and competition-level statements, and cheap enough to iterate on.
+
 
 ## References
 
