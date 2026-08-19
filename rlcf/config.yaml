@@ -1,6 +1,6 @@
 run:
   project: "mesh-autoformalizer"
-  entity: "mozerjanos4-budapesti-m-szaki-s-gazdas-gtudom-nyi-egyetem"
+  entity: "entity"
   group: "rlcf"
   seed: 42
 
